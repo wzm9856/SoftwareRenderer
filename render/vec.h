@@ -1,20 +1,21 @@
 #pragma once
 #include<cmath>
 #include<iostream>
+#include<assert.h>
 
 template <size_t N> 
 class Vector {
 public:
 	double e[N];
 	Vector(double e0 = 0) { for (size_t i = 0; i < N; i++) e[i] = e0; }
-	Vector(double e0, double e1) { assert(N == 2); e[0] = e0; e[1] = e[1]; }
+	Vector(double e0, double e1) { assert(N == 2); e[0] = e0; e[1] = e1; }
 	Vector(double e0, double e1, double e2) { assert(N == 3); e[0] = e0; e[1] = e1; e[2] = e2;}
 	Vector(double e0, double e1, double e2, double e3) { assert(N == 4); e[0] = e0; e[1] = e1; e[2] = e2; e[3] = e3; }
 	Vector(const Vector& v) { for (size_t i = 0; i < N; i++) e[i] = v[i]; }
 	template<size_t N1> operator Vector<N1>() const {
 		Vector<N1> b;
 		for (size_t i = 0; i < N1; i++)
-			b[i] = (i < N) ? a[i] : 0;
+			b[i] = (i < N) ? e[i] : 0;
 		return b;
 	}
 	double& operator[] (size_t i) { assert(i < N); return e[i]; }
@@ -28,7 +29,7 @@ public:
 	const double& z() const{ assert(N > 2); return e[2]; }
 	const double& w() const{ assert(N > 3); return e[3]; }
 
-	double length_squared() const { double ans = 0; for (size_t i = 0; i < N; i++) ans += e[i]; return ans; }
+	double length_squared() const { double ans = 0; for (size_t i = 0; i < N; i++) ans += e[i] * e[i]; return ans; }
 	double length() const { return std::sqrt(this->length_squared()); }
 };
 
@@ -152,7 +153,8 @@ inline Vector<N> operator == (const Vector<N>& a, const Vector<N>& b) {
 template<size_t N>
 inline std::ostream& operator << (std::ostream& out, const Vector<N>& v) {
 	for (size_t i = 0; i < N; i++)
-		out << v[i] << ", ";
+		out << v[i] << "\t";
+	out << std::endl;
 	return out;
 };
 
@@ -197,7 +199,35 @@ inline Vector<N1> vector_convert(const Vector<N2>& a) {
 	return b;
 }
 
+template<size_t N>
+inline Vector<N> lerp(const Vector<N>& a, const Vector<N>& b, double ratio) {
+	Vector<N> ans;
+	for (size_t i = 0; i < N; i++)
+		ans[i] = a[i] * ratio + b[i] * (1 - ratio);
+	return ans;
+}
 
+inline Vector<3> homoto3(const Vector<4>& a) {
+	Vector<3> ans;
+	assert(abs(a[3]) > 1e-6);
+	ans[0] = a[0] / a[3];
+	ans[1] = a[1] / a[3];
+	ans[2] = a[2] / a[3];
+	return ans;
+}
+
+inline Vector<3> homotoscreen(const Vector<4>& a, size_t halfWidth, size_t halfHeight) {
+	Vector<3> ans;
+	assert(abs(a[3]) > 1e-6);
+	ans[0] = (a[0] / a[3] + 1) * halfWidth;
+	ans[1] = (a[1] / a[3] + 1) * halfHeight;
+	ans[2] = a[2] / a[3];
+	return ans;
+}
+
+inline Vector<4> tohomo(const Vector<3>& a) {
+	return Vector<4>(a[0], a[1], a[2], 1);
+}
 //vec reflect(const vec& v, const vec& n) {
 //	return v - 2 * dot(v, n) * n;
 //}
@@ -207,3 +237,11 @@ inline Vector<N1> vector_convert(const Vector<N2>& a) {
 //	vec r_out_parallel = -sqrt(fabs(1.0 - r_out_perp.length_squared())) * n;
 //	return r_out_perp + r_out_parallel;
 //}
+
+struct Vertex {
+	Vertex(double x, double y, double z, double r, double g, double b, double u, double v):
+		pos(x,y,z),color(r,g,b),tex(u,v){}
+	vec3 pos;
+	vec3 color;
+	vec2 tex;
+};
