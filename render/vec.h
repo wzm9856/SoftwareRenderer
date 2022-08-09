@@ -209,39 +209,60 @@ inline Vector<N> lerp(const Vector<N>& a, const Vector<N>& b, double ratio) {
 
 inline Vector<3> homoto3(const Vector<4>& a) {
 	Vector<3> ans;
-	assert(abs(a[3]) > 1e-6);
-	ans[0] = a[0] / a[3];
-	ans[1] = a[1] / a[3];
-	ans[2] = a[2] / a[3];
+	double div = a[3];
+	if (abs(div) < 1e-6) div += div > 0 ? 1e-6 : -1e-6;
+	ans[0] = a[0] / div;
+	ans[1] = a[1] / div;
+	ans[2] = a[2] / div;
 	return ans;
 }
 
 inline Vector<3> homotoscreen(const Vector<4>& a, size_t halfWidth, size_t halfHeight) {
 	Vector<3> ans;
-	assert(abs(a[3]) > 1e-6);
-	ans[0] = (a[0] / a[3] + 1) * halfWidth;
-	ans[1] = (a[1] / a[3] + 1) * halfHeight;
-	ans[2] = a[2] / a[3];
+	double div = a[3];
+	if (abs(div) < 1e-6) div += div > 0 ? 1e-6 : -1e-6;
+	ans[0] = (a[1] / div + 1) * halfHeight;
+	ans[1] = (a[0] / div + 1) * halfWidth;
+	ans[2] = a[2] / div;
 	return ans;
 }
 
 inline Vector<4> tohomo(const Vector<3>& a) {
 	return Vector<4>(a[0], a[1], a[2], 1);
 }
-//vec reflect(const vec& v, const vec& n) {
-//	return v - 2 * dot(v, n) * n;
-//}
-//vec refract(const vec& uv, const vec& n, double etai_over_etat) {
-//	auto cos_theta = fmin(dot(-uv, n), 1.0);
-//	vec r_out_perp = etai_over_etat * (uv + cos_theta * n);
-//	vec r_out_parallel = -sqrt(fabs(1.0 - r_out_perp.length_squared())) * n;
-//	return r_out_perp + r_out_parallel;
-//}
 
 struct Vertex {
 	Vertex(double x, double y, double z, double r, double g, double b, double u, double v):
-		pos(x,y,z),color(r,g,b),tex(u,v){}
+		pos(x,y,z),color(r,g,b),tex(u,v) {}
+	Vertex() {}
 	vec3 pos;
 	vec3 color;
 	vec2 tex;
+	double invz;
+	vec3 camPos;
+	vec3 scrPos;
 };
+
+inline double threeInter(double a, double b, double c, double coea, double coeb, double coec) {
+	return coea * a + coeb * b + coec * c;
+}
+
+Vertex interpolateVertex(const Vertex& a, const Vertex& b, const Vertex& c, double sa, double sb, double sc) {
+	double worldz = 1 / (a.invz * sa + b.invz * sb + c.invz * sc);
+	double coea = sa * a.invz * worldz;
+	double coeb = sb * b.invz * worldz;
+	double coec = sc * c.invz * worldz;
+	//double x = (sa * a.pos.x() * a.invz + sb * b.pos.x() * b.invz + sc * c.pos.x() * c.invz) / worldz;
+	double r = threeInter(a.color.x(), b.color.x(), c.color.x(), coea, coeb, coec);
+	double g = threeInter(a.color.y(), b.color.y(), c.color.y(), coea, coeb, coec);
+	double bb= threeInter(a.color.z(), b.color.z(), c.color.z(), coea, coeb, coec);
+	double u = threeInter(a.tex.x(), b.tex.x(), c.tex.x(), coea, coeb, coec);
+	double v = threeInter(a.tex.y(), b.tex.y(), c.tex.y(), coea, coeb, coec);
+	double wx = threeInter(a.camPos.x(), b.camPos.x(), c.camPos.x(), coea, coeb, coec);
+	double wy = threeInter(a.camPos.y(), b.camPos.y(), c.camPos.y(), coea, coeb, coec);
+	Vertex ans;
+	ans.color = vec3(r, g, bb);
+	ans.tex = vec2(u, v);
+	ans.camPos = vec3(wx, wy, worldz);
+	return ans;
+}

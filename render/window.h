@@ -86,6 +86,10 @@ public:
         groundScale[3][1] = 0;//平面和石头的距离
         groundScale[2][2] = 30;
         groundScale[3][3] = 1;
+        cubeModel = ones<4, 4>() * 10;
+        cubeModel[3][3] = 1;
+        preModel = ones<4, 4>() * 10;
+        preModel[3][3] = 1;
     }
     void clearBuffer() {
         std::fill_n(colorBuffer, _h * _w * 3, 0);
@@ -138,7 +142,19 @@ public:
         colorBuffer[(y + x * _w) * 3 + 1] = color.y() * 255;
         colorBuffer[(y + x * _w) * 3 + 2] = color.z() * 255;
     }
+    bool depthTest(size_t x, size_t y, double depth, bool write = true) {
+        if (x >= _h || y >= _w)
+            return false;
+        if (depth > depthBuffer[y + x * _w])
+            return false;
+        if (write)
+            depthBuffer[y + x * _w] = depth;
+        return true;
+    }
     void render();
+    void vertexShader(Vertex* vList, size_t vSize, const mat4& m, const mat4& mvp);
+    vec3 fragmentShader(const Vertex& v);
+    void rasterize(Vertex* vList, uint16_t* triList, size_t triListSize);
     friend void scrollCallBack(GLFWwindow* window, double xoffset, double yoffset);
 private:
 	size_t _w, _h;
@@ -155,7 +171,7 @@ private:
     float	fov = 60;
     bool	buttonDown = false;
     mat4	cubeModel = ones<4,4>(); //最终设置给shader的M矩阵
-    mat4	tmpModel = ones<4, 4>(); //当鼠标按下没松开时，把tmpModel设置成当前拖动旋转的矩阵，乘上按下鼠标之前的cubeModel（被复制到了preModel），赋给了cubeModel
+    mat4	tmpModel = ones<4, 4>();    //当鼠标按下没松开时，把tmpModel设置成当前拖动旋转的矩阵，乘上按下鼠标之前的cubeModel（被复制到了preModel），赋给了cubeModel
     mat4	preModel = ones<4, 4>(); //当鼠标松开时，把model复制给premodel
     mat4	view = mat4(0);
     mat4	proj = mat4(0);
@@ -167,14 +183,36 @@ private:
     mat4	lightMtx = mat4(0);
     mat3	normalMtx = ones<3, 3>();
     vec4    at = vec4(0); //at是视点，eye是相机坐标
-    vec4    eye = vec4( 0.0f, 0.0f, -20.0f, 0.0f );
+    vec4    eye = vec4( 0.0f, 0.0f, 40.0f, 0.0f );
     vec4    lightat = vec4(0.0f, 0.0f, 0.0f, 0.0f ); //at是视点，eye是光源坐标
     vec4    lighteye = vec4(-20.0f, -20.0f, -20.0f, 0.0f );
     vec4    lightrgb = vec4(1000,1000,1000,0 );
 
-    Vertex vList[3] = { Vertex(-1, 1, 1,0,0,0,0,0),
-                        Vertex(1, 1, 1,0,0,0,0,0),
-                        Vertex(-1,-1, 1,0,0,0,0,0) };
+    //Vertex vList[3] = { Vertex(-1, 1, 1,1,0,0,0,0),
+    //                    Vertex(1, 1, 1,0,1,0,0,0),
+    //                    Vertex(-1,-1, 1,0,0,1,0,0) };
+    Vertex vList[8] = { Vertex(-1, 1, 1,1,0,0,0,0),
+                        Vertex( 1, 1, 1,1,0,0,0,0),
+                        Vertex(-1,-1, 1,1,0,1,0,0),
+                        Vertex( 1,-1, 1,1,0,1,0,0),
+                        Vertex(-1, 1,-1,1,1,0,0,0),
+                        Vertex( 1, 1,-1,1,1,0,0,0),
+                        Vertex(-1,-1,-1,1,1,1,0,0),
+                        Vertex( 1,-1,-1,1,1,1,0,0)};
+    uint16_t triList[36] = { 
+        0, 1, 2, // 0
+        1, 3, 2,
+        4, 6, 5, // 2
+        5, 6, 7,
+        0, 2, 4, // 4
+        4, 2, 6,
+        1, 5, 3, // 6
+        5, 7, 3,
+        0, 4, 1, // 8
+        4, 5, 1,
+        2, 3, 6, // 10
+        6, 3, 7, 
+    };
 
     unsigned char* colorBuffer = nullptr;
     double* depthBuffer = nullptr;
@@ -198,7 +236,7 @@ void Window::getM() {
         rotateY += (curY - oldMouseY) / 150.0;
         oldMouseX = curX;
         oldMouseY = curY;
-        tmpModel = rotateXY(rotateX, rotateY);
+        tmpModel = rotateXY(rotateY, rotateX);
         cubeModel = tmpModel * preModel;
     }
     if (buttonDown && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) != GLFW_PRESS) {
@@ -213,8 +251,8 @@ void Window::getVP() {
     float sensitivity = 0.1;
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
     {
-        eye.z() += sensitivity;
-        at.z() += sensitivity;
+        eye.z() -= sensitivity;
+        at.z() -= sensitivity;
     }
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
     {
@@ -223,8 +261,8 @@ void Window::getVP() {
     }
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
     {
-        eye.z() -= sensitivity;
-        at.z() -= sensitivity;
+        eye.z() += sensitivity;
+        at.z() += sensitivity;
     }
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
     {
@@ -232,16 +270,12 @@ void Window::getVP() {
         at.x() += sensitivity;
     }
     // 生成光源VP矩阵
-    {
-        lightView = lookAt(vec3(lighteye), vec3(lightat));
-        lightProj = perspective(70, 1, 10, 50);
-        lightMtx = lightProj * lightView;
-    }
+    lightView = lookAt(vec3(lighteye), vec3(lightat));
+    lightProj = perspective(70, 1, 10, 50);
+    lightMtx = lightProj * lightView;
     // 生成相机VP矩阵
-    {
-        view = lookAt(vec3(eye), vec3(at));
-        proj = perspective(fov, _w / _h, 1, 500);
-    }
+    view = lookAt(vec3(eye), vec3(at));
+    proj = perspective(fov, (double)_w / _h, 1, 500);
 }
 
 void scrollCallBack(GLFWwindow* window, double xoffset, double yoffset) {
@@ -355,31 +389,121 @@ void triangle(vec3 a, vec3 b, vec3 c, const vec3& color, Window* window) {
     line(c, a, color, window);
 }
 
-void vertexShader(Vertex* vList, size_t vSize, const mat4& mvp, size_t _w, size_t _h, vec3* output) {
+void Window::vertexShader(Vertex* vList, size_t vSize, const mat4& mv, const mat4& mvp) {
     size_t halfw = _w / 2;
     size_t halfh = _h / 2;
+    Vertex* curVer = nullptr;
     for (size_t i = 0; i < vSize; i++) {
-        output[i] = homotoscreen(mvp * tohomo(vList[i].pos), halfw, halfh);
+        curVer = &vList[i];
+        curVer->camPos = homoto3(mv * tohomo(vList[i].pos));
+        curVer->invz = 1 / curVer->camPos.z();
+        curVer->scrPos = homotoscreen(mvp * tohomo(vList[i].pos), halfw, halfh);
+    }
+}
+
+vec3 Window::fragmentShader(const Vertex& v) {
+    //std::cout << v.pos.x() << ' ' << v.pos.y() << std::endl;
+    return vec3(v.color.x(), v.color.y(), v.color.z());
+}
+
+void Window::rasterize(Vertex* vList, uint16_t* triList, size_t triListSize) {
+    vec3 color(1, 1, 1);
+    for (size_t i = 0; i < triListSize; i++) {
+        vec3* a, * b, * c, * aa, * bb, * cc;
+        a = &vList[triList[3 * i]].scrPos;
+        b = &vList[triList[3 * i + 1]].scrPos;
+        c = &vList[triList[3 * i + 2]].scrPos;
+        aa = &vList[triList[3 * i]].scrPos;
+        bb = &vList[triList[3 * i + 1]].scrPos;
+        cc = &vList[triList[3 * i + 2]].scrPos;
+        if (a->y() < b->y()) std::swap(a, b);
+        if (a->y() < c->y()) std::swap(a, c);
+        if (b->y() < c->y()) std::swap(b, c);
+        int bax = b->x() - a->x();
+        int aby = a->y() - b->y() + 1;
+        int cax = c->x() - a->x();
+        int acy = a->y() - c->y() + 1;
+        int cbx = c->x() - b->x();
+        int bcy = b->y() - c->y() + 1;
+        // 下半
+        for (int y = b->y(); y < a->y(); y++) {
+            double left_ratio = (a->y() - y) / acy;
+            int leftx = a->x() + left_ratio * cax;
+            double right_ratio = (a->y() - y) / aby;
+            int rightx = a->x() + right_ratio * bax;
+            for (int x = std::min(leftx, rightx); x <= std::max(leftx, rightx); x++) {
+                // 坐标是(x,y)
+                if (x >= _h || y >= _w)
+                    continue;
+                vec2 xa = vec2(aa->x() - x, aa->y() - y);
+                vec2 xb = vec2(bb->x() - x, bb->y() - y);
+                vec2 xc = vec2(cc->x() - x, cc->y() - y);
+                double sa = abs(cross(xb, xc));
+                double sb = abs(cross(xc, xa));
+                double sc = abs(cross(xa, xb));
+                double s = sa + sb + sc;
+                sa /= s; sb /= s; sc /= s;
+                double scrDepth = aa->z() * sa + bb->z() * sb + cc->z() * sc;
+                if (!depthTest(x, y, scrDepth)) {
+                    continue;
+                }
+                Vertex interAns = interpolateVertex(vList[triList[3 * i]], vList[triList[3 * i + 1]], vList[triList[3 * i + 2]], sa, sb, sc);
+                vec3 color = fragmentShader(interAns);
+                setColor(x, y, color);
+            }
+        }
+        // 上半
+        for (int y = b->y(); y > c->y(); y--) {
+            double left_ratio = (a->y() - y) / acy;
+            int leftx = a->x() + left_ratio * cax;
+            double right_ratio = (b->y() - y) / bcy;
+            int rightx = b->x() + right_ratio * cbx;
+            for (int x = std::min(leftx, rightx); x <= std::max(leftx, rightx); x++) {
+                // 坐标是(x,y)
+                if (x >= _h || y >= _w)
+                    continue;
+                vec2 xa = vec2(aa->x() - x, aa->y() - y);
+                vec2 xb = vec2(bb->x() - x, bb->y() - y);
+                vec2 xc = vec2(cc->x() - x, cc->y() - y);
+                double sa = abs(cross(xb, xc));
+                double sb = abs(cross(xc, xa));
+                double sc = abs(cross(xa, xb));
+                double s = sa + sb + sc;
+                sa /= s; sb /= s; sc /= s;
+                double scrDepth = aa->z() * sa + bb->z() * sb + cc->z() * sc;
+                if (!depthTest(x, y, scrDepth)) {
+                    continue;
+                }
+                Vertex interAns = interpolateVertex(vList[triList[3 * i]], vList[triList[3 * i + 1]], vList[triList[3 * i + 2]], sa, sb, sc);
+                vec3 color = fragmentShader(interAns);
+                setColor(x, y, color);
+            }
+        }
+        line(*a, *b, color, this);
+        line(*b, *c, color, this);
+        line(*c, *a, color, this);
     }
 }
 
 void Window::render() {
     mat4 mvp = proj * view * cubeModel;
-    //Vertex vList[8] = { Vertex(-1, 1, 1,0,0,0,0,0),
-    //                    Vertex( 1, 1, 1,0,0,0,0,0),
-    //                    Vertex(-1,-1, 1,0,0,0,0,0),
-    //                    Vertex( 1,-1, 1,0,0,0,0,0),
-    //                    Vertex(-1, 1,-1,0,0,0,0,0),
-    //                    Vertex( 1, 1,-1,0,0,0,0,0),
-    //                    Vertex(-1,-1,-1,0,0,0,0,0),
-    //                    Vertex( 1,-1,-1,0,0,0,0,0)};
-    vec3 screenPos[3];
-    vertexShader(vList, sizeof(vList) / sizeof(vList[0]), mvp, _w, _h, screenPos);
-    uint16_t triList[] = { 0,1,2 };
+    mat4 mv = view * cubeModel;
+    vertexShader(vList, sizeof(vList) / sizeof(vList[0]), mv, mvp);
+
     size_t triListSize = sizeof(triList) / sizeof(triList[0]) / 3;
-    for (size_t i = 0; i < triListSize; i++) {
-        triangle(screenPos[triList[i * 3]], screenPos[triList[i * 3 + 1]], screenPos[triList[i * 3 + 2]], vec3(1,1,1), this);
-    }
+    rasterize(vList, triList, triListSize);
+    //vec4 pos(1, 0, 0, 1);
+    //vec4 a = cubeModel * pos;
+    //vec4 b = view * a;
+    //vec4 c = proj * b;
+    //vec3 d = homotoscreen(c, _w / 2, _h / 2);
+    //std::cout << cubeModel << std::endl;
+    //std::cout << a << std::endl;
+    //std::cout << view << std::endl;
+    //std::cout << b << std::endl;
+    //std::cout << proj << std::endl;
+    //std::cout << c << std::endl;
+    //std::cout << d << std::endl;
 }
 
 void showFPS(GLFWwindow* window) {

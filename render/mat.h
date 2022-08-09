@@ -257,6 +257,7 @@ mat4 lookAt(const vec3& eye, const vec3& at, const vec3& u=vec3(0,1,0))
 
 mat4 perspective(double fovy, double aspect, double zn, double zf) {
 	mat4 ans(0);
+	fovy = fovy / 180 * 3.1415926;
 	double height = 1.0f / tan(fovy * 0.5f);
 	ans[0][0] = height / aspect;
 	ans[1][1] = height;
