@@ -1,18 +1,22 @@
 #pragma once
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <iostream>
+#include <algorithm>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-#include <iostream>;
 #include "shader.h"
 #include "mat.h"
 #include "vec.h"
+
+constexpr size_t _w = 800;
+constexpr size_t _h = 600;
 
 void scrollCallBack(GLFWwindow* window, double xoffset, double yoffset);
 void showFPS(GLFWwindow* window);
 class Window {
 public:
-    Window(size_t width, size_t height) :_w(width), _h(height) {
+    Window() {
         curWindow = this;
     };
     void* init() {
@@ -75,17 +79,12 @@ public:
         ourShader.use();
         glUniform1i(glGetUniformLocation(ourShader.ID, "texture"), 0);
 
-        this->colorBuffer = new unsigned char[_w * _h * 3];
-        if (!this->colorBuffer) exit(-2);
-        this->depthBuffer = new double[_w * _h];
-        if (!this->depthBuffer) exit(-2);
+        //this->colorBuffer = new unsigned char[_w * _h * 3];
+        //if (!this->colorBuffer) exit(-2);
+        //this->depthBuffer = new double[_w * _h];
+        //if (!this->depthBuffer) exit(-2);
         glfwSetScrollCallback(window, scrollCallBack);
 
-        groundScale[0][0] = 30;
-        groundScale[1][1] = 1;
-        groundScale[3][1] = 0;//平面和石头的距离
-        groundScale[2][2] = 30;
-        groundScale[3][3] = 1;
         cubeModel = ones<4, 4>() * 10;
         cubeModel[3][3] = 1;
         preModel = ones<4, 4>() * 10;
@@ -138,9 +137,10 @@ public:
         //assert(y < _w);
         if (x >= _h || y >= _w)
             return;
-        colorBuffer[(y + x * _w) * 3] = color.x() * 255;
-        colorBuffer[(y + x * _w) * 3 + 1] = color.y() * 255;
-        colorBuffer[(y + x * _w) * 3 + 2] = color.z() * 255;
+        vec3 c = clamp(color, 1, 0);
+        colorBuffer[(y + x * _w) * 3] = c.x() * 255;
+        colorBuffer[(y + x * _w) * 3 + 1] = c.y() * 255;
+        colorBuffer[(y + x * _w) * 3 + 2] = c.z() * 255;
     }
     bool depthTest(size_t x, size_t y, double depth, bool write = true) {
         if (x >= _h || y >= _w)
@@ -153,11 +153,10 @@ public:
     }
     void render();
     void vertexShader(Vertex* vList, size_t vSize, const mat4& m, const mat4& mvp);
-    vec3 fragmentShader(const Vertex& v);
+    vec3 fragmentShader(const Vertex& v, const vec3& normal);
     void rasterize(Vertex* vList, uint16_t* triList, size_t triListSize);
     friend void scrollCallBack(GLFWwindow* window, double xoffset, double yoffset);
 private:
-	size_t _w, _h;
     unsigned int VBO, VAO, EBO;
     unsigned int texture;
     Shader ourShader;
@@ -176,46 +175,66 @@ private:
     mat4	view = mat4(0);
     mat4	proj = mat4(0);
     mat4	identity = ones<4, 4>(); //保持他identity的身份，做一个工具人
-    mat4	groundScale = mat4(0); // 用于拉伸地面模型
-    mat4	groundModel = mat4(0);
     mat4	lightView = mat4(0);
     mat4	lightProj = mat4(0);
     mat4	lightMtx = mat4(0);
     mat3	normalMtx = ones<3, 3>();
     vec4    at = vec4(0); //at是视点，eye是相机坐标
-    vec4    eye = vec4( 0.0f, 0.0f, 40.0f, 0.0f );
+    vec4    eye = vec4( 0.0f, 0.0f, 60.0f, 0.0f );
     vec4    lightat = vec4(0.0f, 0.0f, 0.0f, 0.0f ); //at是视点，eye是光源坐标
-    vec4    lighteye = vec4(-20.0f, -20.0f, -20.0f, 0.0f );
-    vec4    lightrgb = vec4(1000,1000,1000,0 );
+    vec4    lighteye = vec4(-40.0f, -40.0f, 40.0f, 0.0f );
+    vec3    lightCamPos = vec3(0);
+    vec3    lightrgb = vec3(5000);
 
     //Vertex vList[3] = { Vertex(-1, 1, 1,1,0,0,0,0),
     //                    Vertex(1, 1, 1,0,1,0,0,0),
     //                    Vertex(-1,-1, 1,0,0,1,0,0) };
-    Vertex vList[8] = { Vertex(-1, 1, 1,1,0,0,0,0),
-                        Vertex( 1, 1, 1,1,0,0,0,0),
-                        Vertex(-1,-1, 1,1,0,1,0,0),
-                        Vertex( 1,-1, 1,1,0,1,0,0),
-                        Vertex(-1, 1,-1,1,1,0,0,0),
-                        Vertex( 1, 1,-1,1,1,0,0,0),
+    Vertex vList[16] = {Vertex(-1,1,1,1,0,0,0,0),
+                        Vertex(1,1,1,1,0,0,0,0),
+                        Vertex(-1,-1,1,1,0,1,0,0),
+                        Vertex(1,-1,1,1,0,1,0,0),
+                        Vertex(-1,1,-1,1,1,0,0,0),
+                        Vertex(1,1,-1,1,1,0,0,0),
                         Vertex(-1,-1,-1,1,1,1,0,0),
-                        Vertex( 1,-1,-1,1,1,1,0,0)};
-    uint16_t triList[36] = { 
-        0, 1, 2, // 0
+                        Vertex(1,-1,-1,1,1,1,0,0),
+                        Vertex(-3,-1,3,0.5,0.5,0.5,0,0),
+                        Vertex(3,-1,3,0.5,0.5,0.5,0,0),
+                        Vertex(-3,-1.2,3,0.5,0.5,0.5,0,0),
+                        Vertex(3,-1.2,3,0.5,0.5,0.5,0,0),
+                        Vertex(-3,-1,-3,0.5,0.5,0.5,0,0),
+                        Vertex(3,-1,-3,0.5,0.5,0.5,0,0),
+                        Vertex(-3,-1.2,-3,0.5,0.5,0.5,0,0),
+                        Vertex(3,-1.2,-3,0.5,0.5,0.5,0,0)};
+    uint16_t triList[72] = { 
+        0, 1, 2,
         1, 3, 2,
-        4, 6, 5, // 2
+        4, 6, 5,
         5, 6, 7,
-        0, 2, 4, // 4
+        0, 2, 4,
         4, 2, 6,
-        1, 5, 3, // 6
+        1, 5, 3,
         5, 7, 3,
-        0, 4, 1, // 8
+        0, 4, 1,
         4, 5, 1,
-        2, 3, 6, // 10
-        6, 3, 7, 
+        2, 3, 6,
+        6, 3, 7,
+        8, 9, 10,
+        9, 11, 10,
+        12, 14, 13,
+        13, 14, 15,
+        8, 10, 12,
+        12, 10, 14,
+        9, 13, 11,
+        13, 15, 11,
+        8, 12, 9,
+        12, 13, 9,
+        10, 11, 14,
+        14, 11, 15
     };
 
-    unsigned char* colorBuffer = nullptr;
-    double* depthBuffer = nullptr;
+    unsigned char colorBuffer[_w * _h * 3];
+    double depthBuffer[_w * _h];
+    double shadowBuffer[_w * _h];
 
     static Window* curWindow;
 };
@@ -243,7 +262,6 @@ void Window::getM() {
         buttonDown = false;
         preModel = cubeModel;
     }
-    groundModel = cubeModel * groundScale;
 }
 
 void Window::getVP() {
@@ -395,20 +413,39 @@ void Window::vertexShader(Vertex* vList, size_t vSize, const mat4& mv, const mat
     Vertex* curVer = nullptr;
     for (size_t i = 0; i < vSize; i++) {
         curVer = &vList[i];
-        curVer->camPos = homoto3(mv * tohomo(vList[i].pos));
+        curVer->camPos = homoto3(mv * vList[i].pos);
         curVer->invz = 1 / curVer->camPos.z();
-        curVer->scrPos = homotoscreen(mvp * tohomo(vList[i].pos), halfw, halfh);
+        curVer->scrPos = homotoscreen(mvp * vList[i].pos, halfw, halfh);
     }
 }
 
-vec3 Window::fragmentShader(const Vertex& v) {
-    //std::cout << v.pos.x() << ' ' << v.pos.y() << std::endl;
-    return vec3(v.color.x(), v.color.y(), v.color.z());
+vec3 Window::fragmentShader(const Vertex& v, const vec3& normal) {
+    vec3 lightdir = lightCamPos - v.camPos;
+    vec3 lightdir_n = normalize(lightdir);
+    vec3 viewdir = normalize(-v.camPos);
+
+    vec3 ambient = 0.1 * v.color;
+
+    double r2 = dot(lightdir, lightdir);
+    vec3 diffuse = 0.8 * v.color * lightrgb / r2 * std::max(0.0, dot(normal, lightdir_n));
+
+    vec3 half_vec = (lightdir_n + viewdir) / (lightdir_n + viewdir).length();
+    vec3 specular = 0.1 * lightrgb / r2;
+    double a = std::max(0.0, pow(dot(normal, half_vec), 50.0));
+
+    return ambient + diffuse + specular*a;
 }
 
 void Window::rasterize(Vertex* vList, uint16_t* triList, size_t triListSize) {
-    vec3 color(1, 1, 1);
+    lightCamPos = homoto3(view * tohomo(lighteye));
     for (size_t i = 0; i < triListSize; i++) {
+        vec3 scrab = vList[triList[3 * i]].scrPos - vList[triList[3 * i + 1]].scrPos;
+        vec3 scrbc = vList[triList[3 * i + 1]].scrPos - vList[triList[3 * i + 2]].scrPos;
+        vec3 normal = cross(scrab, scrbc);
+        if (normal.z() < 0)
+            continue;
+        normal = normalize(normal);
+
         vec3* a, * b, * c, * aa, * bb, * cc;
         a = &vList[triList[3 * i]].scrPos;
         b = &vList[triList[3 * i + 1]].scrPos;
@@ -448,7 +485,7 @@ void Window::rasterize(Vertex* vList, uint16_t* triList, size_t triListSize) {
                     continue;
                 }
                 Vertex interAns = interpolateVertex(vList[triList[3 * i]], vList[triList[3 * i + 1]], vList[triList[3 * i + 2]], sa, sb, sc);
-                vec3 color = fragmentShader(interAns);
+                vec3 color = fragmentShader(interAns, normal);
                 setColor(x, y, color);
             }
         }
@@ -475,10 +512,11 @@ void Window::rasterize(Vertex* vList, uint16_t* triList, size_t triListSize) {
                     continue;
                 }
                 Vertex interAns = interpolateVertex(vList[triList[3 * i]], vList[triList[3 * i + 1]], vList[triList[3 * i + 2]], sa, sb, sc);
-                vec3 color = fragmentShader(interAns);
+                vec3 color = fragmentShader(interAns, normal);
                 setColor(x, y, color);
             }
         }
+        vec3 color(1);
         line(*a, *b, color, this);
         line(*b, *c, color, this);
         line(*c, *a, color, this);

@@ -71,6 +71,13 @@ inline Vector<N> operator - (const Vector<N>& a, const Vector<N>& b) {
 };
 
 template <size_t N>
+inline Vector<N> operator - (const Vector<N>& a) {
+	Vector<N> c;
+	for (size_t i = 0; i < N; i++) c[i] = -a[i];
+	return c;
+};
+
+template <size_t N>
 inline Vector<N> operator - (const Vector<N>& a, double b) {
 	Vector<N> c;
 	for (size_t i = 0; i < N; i++) c[i] = a[i] - b;
@@ -101,6 +108,11 @@ inline Vector<N> operator * (const Vector<N>& a, double b) {
 	Vector<N> c;
 	for (size_t i = 0; i < N; i++) c[i] = a[i] * b;
 	return c;
+};
+
+template <size_t N>
+inline Vector<N> operator * (double b, const Vector<N>& a) {
+	return a * b;
 };
 
 template <size_t N>
@@ -207,6 +219,15 @@ inline Vector<N> lerp(const Vector<N>& a, const Vector<N>& b, double ratio) {
 	return ans;
 }
 
+template<size_t N>
+inline Vector<N> clamp(const Vector<N>& a, double max, double min) {
+	assert(min <= max);
+	Vector<N> ans;
+	for (size_t i = 0; i < N; i++)
+		ans[i] = a[i]<min ? min : a[i]>max ? max : a[i];
+	return ans;
+}
+
 inline Vector<3> homoto3(const Vector<4>& a) {
 	Vector<3> ans;
 	double div = a[3];
@@ -233,9 +254,9 @@ inline Vector<4> tohomo(const Vector<3>& a) {
 
 struct Vertex {
 	Vertex(double x, double y, double z, double r, double g, double b, double u, double v):
-		pos(x,y,z),color(r,g,b),tex(u,v) {}
+		pos(x,y,z,1),color(r,g,b),tex(u,v) {}
 	Vertex() {}
-	vec3 pos;
+	vec4 pos;
 	vec3 color;
 	vec2 tex;
 	double invz;

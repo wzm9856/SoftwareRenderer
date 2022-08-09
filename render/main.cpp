@@ -8,7 +8,7 @@
 
 int main()
 {
-	Window* window = new Window(800, 600);
+	Window* window = new Window();
 	window->init();
 	window->start();
 	delete window;
