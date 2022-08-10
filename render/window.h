@@ -9,8 +9,10 @@
 #include "mat.h"
 #include "vec.h"
 
-constexpr size_t _w = 800;
-constexpr size_t _h = 600;
+constexpr int _w = 800;
+constexpr int _h = 600;
+constexpr int shadow_w = 512;
+constexpr int shadow_h = 512;
 
 void scrollCallBack(GLFWwindow* window, double xoffset, double yoffset);
 void showFPS(GLFWwindow* window);
@@ -93,6 +95,7 @@ public:
     void clearBuffer() {
         std::fill_n(colorBuffer, _h * _w * 3, 0);
         std::fill_n(depthBuffer, _h * _w, 1.0);
+        std::fill_n(shadowBuffer, shadow_h * shadow_w, 1.0);
     }
     void start() {
         while (!glfwWindowShouldClose(window))
@@ -133,8 +136,6 @@ public:
         return curWindow;
     }
     void setColor(size_t x, size_t y, const vec3& color) {
-        //assert(x < _h);
-        //assert(y < _w);
         if (x >= _h || y >= _w)
             return;
         vec3 c = clamp(color, 1, 0);
@@ -151,10 +152,11 @@ public:
             depthBuffer[y + x * _w] = depth;
         return true;
     }
+    void renderShadow();
     void render();
-    void vertexShader(Vertex* vList, size_t vSize, const mat4& m, const mat4& mvp);
+    void vertexShader(Vertex* vList, const mat4& m, const mat4& mvp);
     vec3 fragmentShader(const Vertex& v, const vec3& normal);
-    void rasterize(Vertex* vList, uint16_t* triList, size_t triListSize);
+    void rasterize();
     friend void scrollCallBack(GLFWwindow* window, double xoffset, double yoffset);
 private:
     unsigned int VBO, VAO, EBO;
@@ -175,14 +177,13 @@ private:
     mat4	view = mat4(0);
     mat4	proj = mat4(0);
     mat4	identity = ones<4, 4>(); //保持他identity的身份，做一个工具人
-    mat4	lightView = mat4(0);
-    mat4	lightProj = mat4(0);
-    mat4	lightMtx = mat4(0);
     mat3	normalMtx = ones<3, 3>();
     vec4    at = vec4(0); //at是视点，eye是相机坐标
     vec4    eye = vec4( 0.0f, 0.0f, 60.0f, 0.0f );
-    vec4    lightat = vec4(0.0f, 0.0f, 0.0f, 0.0f ); //at是视点，eye是光源坐标
-    vec4    lighteye = vec4(-40.0f, -40.0f, 40.0f, 0.0f );
+    vec4    lightat = vec4(0.0f, 0.0f, 0.0f, 1 ); //at是视点，eye是光源坐标
+    vec4    lighteye = vec4(-40.0f, -40.0f, 40.0f, 1 );
+    mat4	lightView = lookAt(vec3(lighteye), vec3(lightat));
+    mat4	lightProj = perspective(70, shadow_w / shadow_h, 10, 50);
     vec3    lightCamPos = vec3(0);
     vec3    lightrgb = vec3(5000);
 
@@ -205,6 +206,7 @@ private:
                         Vertex(3,-1,-3,0.5,0.5,0.5,0,0),
                         Vertex(-3,-1.2,-3,0.5,0.5,0.5,0,0),
                         Vertex(3,-1.2,-3,0.5,0.5,0.5,0,0)};
+    size_t vSize = sizeof(vList) / sizeof(vList[0]);
     uint16_t triList[72] = { 
         0, 1, 2,
         1, 3, 2,
@@ -231,10 +233,11 @@ private:
         10, 11, 14,
         14, 11, 15
     };
+    size_t triListSize = sizeof(triList) / sizeof(triList[0]) / 3;
 
     unsigned char colorBuffer[_w * _h * 3];
     double depthBuffer[_w * _h];
-    double shadowBuffer[_w * _h];
+    double shadowBuffer[shadow_w * shadow_h];
 
     static Window* curWindow;
 };
@@ -265,7 +268,7 @@ void Window::getM() {
 }
 
 void Window::getVP() {
-    //处理输入生成VP矩阵
+    // 处理输入
     float sensitivity = 0.1;
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
     {
@@ -287,10 +290,6 @@ void Window::getVP() {
         eye.x() += sensitivity;
         at.x() += sensitivity;
     }
-    // 生成光源VP矩阵
-    lightView = lookAt(vec3(lighteye), vec3(lightat));
-    lightProj = perspective(70, 1, 10, 50);
-    lightMtx = lightProj * lightView;
     // 生成相机VP矩阵
     view = lookAt(vec3(eye), vec3(at));
     proj = perspective(fov, (double)_w / _h, 1, 500);
@@ -407,7 +406,7 @@ void triangle(vec3 a, vec3 b, vec3 c, const vec3& color, Window* window) {
     line(c, a, color, window);
 }
 
-void Window::vertexShader(Vertex* vList, size_t vSize, const mat4& mv, const mat4& mvp) {
+void Window::vertexShader(Vertex* vList, const mat4& mv, const mat4& mvp) {
     size_t halfw = _w / 2;
     size_t halfh = _h / 2;
     Vertex* curVer = nullptr;
@@ -430,14 +429,12 @@ vec3 Window::fragmentShader(const Vertex& v, const vec3& normal) {
     vec3 diffuse = 0.8 * v.color * lightrgb / r2 * std::max(0.0, dot(normal, lightdir_n));
 
     vec3 half_vec = (lightdir_n + viewdir) / (lightdir_n + viewdir).length();
-    vec3 specular = 0.1 * lightrgb / r2;
-    double a = std::max(0.0, pow(dot(normal, half_vec), 50.0));
+    vec3 specular = 0.1 * lightrgb / r2 * std::max(0.0, pow(dot(normal, half_vec), 50.0));
 
-    return ambient + diffuse + specular*a;
+    return ambient + diffuse + specular;
 }
 
-void Window::rasterize(Vertex* vList, uint16_t* triList, size_t triListSize) {
-    lightCamPos = homoto3(view * tohomo(lighteye));
+void Window::rasterize() {
     for (size_t i = 0; i < triListSize; i++) {
         vec3 scrab = vList[triList[3 * i]].scrPos - vList[triList[3 * i + 1]].scrPos;
         vec3 scrbc = vList[triList[3 * i + 1]].scrPos - vList[triList[3 * i + 2]].scrPos;
@@ -462,43 +459,32 @@ void Window::rasterize(Vertex* vList, uint16_t* triList, size_t triListSize) {
         int acy = a->y() - c->y() + 1;
         int cbx = c->x() - b->x();
         int bcy = b->y() - c->y() + 1;
-        // 下半
-        for (int y = b->y(); y < a->y(); y++) {
-            double left_ratio = (a->y() - y) / acy;
-            int leftx = a->x() + left_ratio * cax;
-            double right_ratio = (a->y() - y) / aby;
-            int rightx = a->x() + right_ratio * bax;
-            for (int x = std::min(leftx, rightx); x <= std::max(leftx, rightx); x++) {
-                // 坐标是(x,y)
-                if (x >= _h || y >= _w)
-                    continue;
-                vec2 xa = vec2(aa->x() - x, aa->y() - y);
-                vec2 xb = vec2(bb->x() - x, bb->y() - y);
-                vec2 xc = vec2(cc->x() - x, cc->y() - y);
-                double sa = abs(cross(xb, xc));
-                double sb = abs(cross(xc, xa));
-                double sc = abs(cross(xa, xb));
-                double s = sa + sb + sc;
-                sa /= s; sb /= s; sc /= s;
-                double scrDepth = aa->z() * sa + bb->z() * sb + cc->z() * sc;
-                if (!depthTest(x, y, scrDepth)) {
-                    continue;
-                }
-                Vertex interAns = interpolateVertex(vList[triList[3 * i]], vList[triList[3 * i + 1]], vList[triList[3 * i + 2]], sa, sb, sc);
-                vec3 color = fragmentShader(interAns, normal);
-                setColor(x, y, color);
+
+        int topy = std::min(_w - 1, (int)a->y());
+        int bottomy = std::max(0, (int)c->y());
+        for (int y = bottomy; y < topy; y++) {
+            //for (int y = c->y(); y < a->y(); y++) {
+            int leftx, rightx;
+            double left_ratio, right_ratio;
+            // 上半
+            if (y < b->y()) {
+                left_ratio = (a->y() - y) / acy;
+                leftx = a->x() + left_ratio * cax;
+                right_ratio = (b->y() - y) / bcy;
+                rightx = b->x() + right_ratio * cbx;
             }
-        }
-        // 上半
-        for (int y = b->y(); y > c->y(); y--) {
-            double left_ratio = (a->y() - y) / acy;
-            int leftx = a->x() + left_ratio * cax;
-            double right_ratio = (b->y() - y) / bcy;
-            int rightx = b->x() + right_ratio * cbx;
-            for (int x = std::min(leftx, rightx); x <= std::max(leftx, rightx); x++) {
+            // 下半
+            else {
+                left_ratio = (a->y() - y) / acy;
+                leftx = a->x() + left_ratio * cax;
+                right_ratio = (a->y() - y) / aby;
+                rightx = a->x() + right_ratio * bax;
+            }
+            if (leftx > rightx)std::swap(leftx, rightx);
+            leftx = std::max(0, leftx);
+            rightx = std::min(_h, rightx);
+            for (int x = leftx; x <= rightx; x++) {
                 // 坐标是(x,y)
-                if (x >= _h || y >= _w)
-                    continue;
                 vec2 xa = vec2(aa->x() - x, aa->y() - y);
                 vec2 xb = vec2(bb->x() - x, bb->y() - y);
                 vec2 xc = vec2(cc->x() - x, cc->y() - y);
@@ -523,13 +509,86 @@ void Window::rasterize(Vertex* vList, uint16_t* triList, size_t triListSize) {
     }
 }
 
+void Window::renderShadow() {
+    mat4 lightMVP = lightProj * lightView * cubeModel;
+    size_t halfw = shadow_w / 2;
+    size_t halfh = shadow_h / 2;
+    Vertex* curVer = nullptr;
+    vec3 curScrPos;
+    for (size_t i = 0; i < vSize; i++) {
+        vList[i].scrPos = homotoscreen(lightMVP * vList[i].pos, halfw, halfh);
+    }
+    for (size_t i = 0; i < triListSize; i++) {
+        vec3 scrab = vList[triList[3 * i]].scrPos - vList[triList[3 * i + 1]].scrPos;
+        vec3 scrbc = vList[triList[3 * i + 1]].scrPos - vList[triList[3 * i + 2]].scrPos;
+        vec3 normal = cross(scrab, scrbc);
+        if (normal.z() < 0)
+            continue;
+
+        vec3* a, * b, * c, * aa, * bb, * cc;
+        a = &vList[triList[3 * i]].scrPos;
+        b = &vList[triList[3 * i + 1]].scrPos;
+        c = &vList[triList[3 * i + 2]].scrPos;
+        aa = &vList[triList[3 * i]].scrPos;
+        bb = &vList[triList[3 * i + 1]].scrPos;
+        cc = &vList[triList[3 * i + 2]].scrPos;
+        if (a->y() < b->y()) std::swap(a, b);
+        if (a->y() < c->y()) std::swap(a, c);
+        if (b->y() < c->y()) std::swap(b, c);
+        int bax = b->x() - a->x();
+        int aby = a->y() - b->y() + 1;
+        int cax = c->x() - a->x();
+        int acy = a->y() - c->y() + 1;
+        int cbx = c->x() - b->x();
+        int bcy = b->y() - c->y() + 1;
+
+        int topy = std::min(shadow_w - 1, (int)a->y());
+        int bottomy = std::max(0, (int)c->y());
+        for (int y = bottomy; y < topy; y++) {
+            int leftx, rightx;
+            double left_ratio, right_ratio;
+            // 上半
+            if (y < b->y()) {
+                left_ratio = (a->y() - y) / acy;
+                leftx = a->x() + left_ratio * cax;
+                right_ratio = (b->y() - y) / bcy;
+                rightx = b->x() + right_ratio * cbx;
+            }
+            // 下半
+            else {
+                left_ratio = (a->y() - y) / acy;
+                leftx = a->x() + left_ratio * cax;
+                right_ratio = (a->y() - y) / aby;
+                rightx = a->x() + right_ratio * bax;
+            }
+            if (leftx > rightx)std::swap(leftx, rightx);
+            leftx = std::max(0, leftx);
+            rightx = std::min(shadow_h, rightx);
+            for (int x = leftx; x <= rightx; x++) {
+                // 坐标是(x,y)
+                vec2 xa = vec2(aa->x() - x, aa->y() - y);
+                vec2 xb = vec2(bb->x() - x, bb->y() - y);
+                vec2 xc = vec2(cc->x() - x, cc->y() - y);
+                double sa = abs(cross(xb, xc));
+                double sb = abs(cross(xc, xa));
+                double sc = abs(cross(xa, xb));
+                double s = sa + sb + sc;
+                double scrDepth = (aa->z() * sa + bb->z() * sb + cc->z() * sc) / s;
+                if (scrDepth < shadowBuffer[y + x * shadow_w])
+                    shadowBuffer[y + x * shadow_w] = scrDepth;
+            }
+        }
+    }
+}
+
 void Window::render() {
     mat4 mvp = proj * view * cubeModel;
     mat4 mv = view * cubeModel;
-    vertexShader(vList, sizeof(vList) / sizeof(vList[0]), mv, mvp);
-
-    size_t triListSize = sizeof(triList) / sizeof(triList[0]) / 3;
-    rasterize(vList, triList, triListSize);
+    renderShadow();
+    vertexShader(vList, mv, mvp);
+    lightCamPos = homoto3(view * lighteye);
+    rasterize();
+    //std::cout << lightView << lightProj;
     //vec4 pos(1, 0, 0, 1);
     //vec4 a = cubeModel * pos;
     //vec4 b = view * a;
